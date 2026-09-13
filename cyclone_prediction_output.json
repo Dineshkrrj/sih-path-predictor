@@ -1,0 +1,19 @@
+{
+    "project": "Smart India Hackathon - Cyclone Path Predictor",
+    "status": "Success",
+    "inputs": {
+        "cyclone_id": "200301C",
+        "history_window_steps": 8,
+        "last_observed_time": "2003081121"
+    },
+    "prediction_3h_ahead": {
+        "latitude": 11.8875,
+        "longitude": 216.5877,
+        "units": "degrees",
+        "vector_space": {
+            "predicted_delta_x": -0.0011617435375228524,
+            "predicted_delta_y": 0.005782580003142357,
+            "predicted_delta_z": 0.0014953594654798508
+        }
+    }
+}
