@@ -1,7 +1,7 @@
 name: Run Cyclone Path Inference
 
 on:
-  workflow_dispatch: # Adds a manual "Run" action button directly in your GitHub UI panel
+  workflow_dispatch: # Allows manual button trigger in GitHub Actions UI
 
 jobs:
   inference:
@@ -11,16 +11,17 @@ jobs:
     - name: Checkout Repository Code
       uses: actions/checkout@v4
 
-    # Configures an isolated workspace container with native x86 pip wheel distribution assets
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
+    # 🛠️ CRITICAL FIX: Lock dependencies to TensorFlow 2.15 to match your model's Keras version
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install numpy pandas tensorflow scikit-learn
+        pip install numpy==1.26.4 pandas==2.2.2 scikit-learn==1.5.0
+        pip install tensorflow==2.15.0
 
     - name: Execute Model Inference Script
       run: |
