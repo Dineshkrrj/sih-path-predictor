@@ -9,7 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 # =====================================================================
 MODEL_FILENAME = "cyclone_path_predictor.keras"
 CSV_INPUT_FILE = "cyclone_data.csv"
-LOOKBACK = 4  # Looks at 4 steps to predict the next 1
+LOOKBACK = 8  # Ingests all 8 historical rows to predict the next future step
 
 # =====================================================================
 # STEP 1: Preprocessing & Vector Transformations
@@ -17,7 +17,7 @@ LOOKBACK = 4  # Looks at 4 steps to predict the next 1
 def preprocess_cyclone_data(csv_path):
     df = pd.read_csv(csv_path)
     
-    # ⚠️ PLACEHOLDER: Ensuring Vmax exists (replace with true values later)
+    # Ensuring Vmax exists (replace with your true values later)
     if 'Vmax' not in df.columns:
         df['Vmax'] = 0.0
 
@@ -46,7 +46,7 @@ def preprocess_cyclone_data(csv_path):
 # =====================================================================
 # STEP 2: Window Generation & Track Alignment
 # =====================================================================
-def prepare_inference_matrices(df, lookback=4):
+def prepare_inference_matrices(df, lookback=8):
     feature_cols = ['scaled_time', 'Vmax', 'x', 'y', 'z']
     
     X_list = []
@@ -63,9 +63,8 @@ def prepare_inference_matrices(df, lookback=4):
         timestamps = group['time'].values
 
         if len(feats) < lookback:
-            continue
+            raise ValueError(f"Error: Dataset contains {len(feats)} rows, but a lookback of {lookback} is required.")
 
-        # Adjust tracking loops to catch the future predicted time points
         for i in range(len(feats) - lookback + 1):
             window = feats[i : i + lookback]
             X_list.append(window)
@@ -121,8 +120,9 @@ if __name__ == "__main__":
     # 1. Process local CSV containing the 8 rows
     df_processed = preprocess_cyclone_data(CSV_INPUT_FILE)
     
-    # 2. Extract sequences (Yields 5 sliding window steps out of 8 total rows)
+    # 2. Extract sequence (Yields exactly 1 sliding window step out of 8 total rows)
     X_val, absolute_positions, target_times = prepare_inference_matrices(df_processed, lookback=LOOKBACK)
+    print(f"Generated Sequence Matrix Input Shape: {X_val.shape}")  # Outputs: (1, 8, 5)
 
     # 3. Predict from local Keras model asset
     model = tf.keras.models.load_model(MODEL_FILENAME)
@@ -135,6 +135,7 @@ if __name__ == "__main__":
     final_json_output = json.dumps({"predictions": predictions_list}, indent=4)
     
     # Print clean JSON out to console
+    print("\n=== INFERENCE PREDICTIONS OUTCOME ===")
     print(final_json_output)
 
     # Save tracking payload directly to a JSON file
