@@ -16,12 +16,13 @@ LOOKBACK = 8
 FORECAST_STEPS = 3    
 
 # =====================================================================
-# 🛠️ UNIVERSAL LAYER CONFIG PATCHER (Fixes Deserialization Issues)
+# 🛠️ UNIVERSAL LAYER CONFIG PATCHER (Natively Modifies JSON Objects)
 # =====================================================================
 def patch_keras_model_config(model_path):
     """
-    Strips out version-conflicting keyword arguments directly from 
-    the model's internal config JSON file before Keras tries to read it.
+    Safely unzips the .keras archive, parses the configuration file as a real 
+    Python dictionary, strips version-incompatible keys structurally, 
+    and packages it back into a valid archive format.
     """
     temp_dir = "patched_model_temp"
     patched_model_path = "patched_" + model_path
@@ -29,7 +30,7 @@ def patch_keras_model_config(model_path):
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
         
-    # Extract the .keras zip archive
+    # Extract the archive assets
     with zipfile.ZipFile(model_path, 'r') as zip_ref:
         zip_ref.extractall(temp_dir)
         
@@ -37,16 +38,20 @@ def patch_keras_model_config(model_path):
     
     if os.path.exists(config_json_path):
         with open(config_json_path, 'r') as f:
-            config_str = f.read()
+            model_config = json.load(f)
             
-        # Clean conflicting fields that break older or newer Keras versions
-        config_str = config_str.replace('"quantization_config": null,', '')
-        config_str = config_str.replace('"quantization_config": null', '')
-        config_str = config_str.replace('"optional": false,', '')
-        config_str = config_str.replace('"optional": false', '')
-        
+        # Natively traverse the layers list to clear bad keys from the config structure
+        if "config" in model_config and "layers" in model_config["config"]:
+            for layer in model_config["config"]["layers"]:
+                layer_config = layer.get("config", {})
+                
+                # Strip incompatible Keras 3.x Dense/Input keys out entirely
+                layer_config.pop("quantization_config", None)
+                layer_config.pop("optional", None)
+                
+        # Re-save the clean dict back out to structural JSON format
         with open(config_json_path, 'w') as f:
-            f.write(config_str)
+            json.dump(model_config, f, indent=4)
             
     # Re-zip into a patched archive asset
     shutil.make_archive(patched_model_path.replace(".keras", ""), 'zip', temp_dir)
@@ -54,7 +59,7 @@ def patch_keras_model_config(model_path):
         os.remove(patched_model_path)
     os.rename(patched_model_path.replace(".keras", "") + ".zip", patched_model_path)
     
-    # Cleanup workspace
+    # Cleanup local temporary files workspace
     shutil.rmtree(temp_dir)
     return patched_model_path
 
@@ -131,8 +136,10 @@ def run_recursive_forecast(df, model, scaler_time, lookback=8, steps=3):
     for step in range(1, steps + 1):
         input_matrix = np.expand_dims(current_window, axis=0)
         
-        # In modern versions, model outputs might contain a batch layer list
+        # Predict using the network engine
         predicted_delta = model.predict(input_matrix, verbose=0)
+        
+        # Ensure array dimension matching remains flattened
         if len(predicted_delta.shape) > 1:
             predicted_delta = predicted_delta[0]
 
@@ -146,7 +153,7 @@ def run_recursive_forecast(df, model, scaler_time, lookback=8, steps=3):
         target_timestamp = int(last_dt.strftime('%Y%m%d%H'))
         current_elapsed_hours += 3.0
         
-        scaled_time_val = scaler_time.transform([[current_elapsed_hours]])[0][0]
+        scaled_time_val = float(scaler_time.transform([[current_elapsed_hours]])[0][0])
 
         output_records.append({
             "forecast_horizon": f"+{step * 3} hours",
@@ -178,7 +185,7 @@ if __name__ == "__main__":
     print("Loading Patched Neural Network Asset...")
     model = tf.keras.models.load_model(safe_model_path, compile=False)
     
-    # Remove the temporary safe copy file after it's securely loaded in RAM
+    # Remove the patched copy after it's securely loaded in memory
     if os.path.exists(safe_model_path):
         os.remove(safe_model_path)
         
@@ -193,3 +200,4 @@ if __name__ == "__main__":
 
     with open("cyclone_prediction_output.json", "w") as json_file:
         json_file.write(final_json_output)
+    print("\nResults successfully exported to 'cyclone_prediction_output.json'")
