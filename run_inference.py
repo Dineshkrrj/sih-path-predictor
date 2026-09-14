@@ -1,4 +1,7 @@
+import os
 import json
+import zipfile
+import shutil
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -11,6 +14,49 @@ MODEL_FILENAME = "cyclone_path_predictor.keras"
 CSV_INPUT_FILE = "cyclone_data.csv"
 LOOKBACK = 8          
 FORECAST_STEPS = 3    
+
+# =====================================================================
+# 🛠️ UNIVERSAL LAYER CONFIG PATCHER (Fixes Deserialization Issues)
+# =====================================================================
+def patch_keras_model_config(model_path):
+    """
+    Strips out version-conflicting keyword arguments directly from 
+    the model's internal config JSON file before Keras tries to read it.
+    """
+    temp_dir = "patched_model_temp"
+    patched_model_path = "patched_" + model_path
+    
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+        
+    # Extract the .keras zip archive
+    with zipfile.ZipFile(model_path, 'r') as zip_ref:
+        zip_ref.extractall(temp_dir)
+        
+    config_json_path = os.path.join(temp_dir, "config.json")
+    
+    if os.path.exists(config_json_path):
+        with open(config_json_path, 'r') as f:
+            config_str = f.read()
+            
+        # Clean conflicting fields that break older or newer Keras versions
+        config_str = config_str.replace('"quantization_config": null,', '')
+        config_str = config_str.replace('"quantization_config": null', '')
+        config_str = config_str.replace('"optional": false,', '')
+        config_str = config_str.replace('"optional": false', '')
+        
+        with open(config_json_path, 'w') as f:
+            f.write(config_str)
+            
+    # Re-zip into a patched archive asset
+    shutil.make_archive(patched_model_path.replace(".keras", ""), 'zip', temp_dir)
+    if os.path.exists(patched_model_path):
+        os.remove(patched_model_path)
+    os.rename(patched_model_path.replace(".keras", "") + ".zip", patched_model_path)
+    
+    # Cleanup workspace
+    shutil.rmtree(temp_dir)
+    return patched_model_path
 
 # =====================================================================
 # STEP 1: Preprocessing & Vector Transformations
@@ -50,7 +96,6 @@ def xyz_to_latlon(x, y, z):
     pred_lat = np.degrees(np.arcsin(z_clipped))
     pred_lon = np.degrees(np.arctan2(y, x))
     pred_lon = np.where(pred_lon < 0, pred_lon + 360, pred_lon)
-    # 🛠️ BUG FIX: Force explicit cast to primitive float to prevent JSON serialization crash
     return float(round(float(pred_lat), 4)), float(round(float(pred_lon), 4))
 
 def latlon_to_xyz(lat, lon):
@@ -85,7 +130,11 @@ def run_recursive_forecast(df, model, scaler_time, lookback=8, steps=3):
 
     for step in range(1, steps + 1):
         input_matrix = np.expand_dims(current_window, axis=0)
-        predicted_delta = model.predict(input_matrix, verbose=0)[0] 
+        
+        # In modern versions, model outputs might contain a batch layer list
+        predicted_delta = model.predict(input_matrix, verbose=0)
+        if len(predicted_delta.shape) > 1:
+            predicted_delta = predicted_delta[0]
 
         current_absolute_xyz = current_window[-1, [x_idx, y_idx, z_idx]]
         future_absolute_xyz = current_absolute_xyz + predicted_delta
@@ -123,9 +172,17 @@ def run_recursive_forecast(df, model, scaler_time, lookback=8, steps=3):
 if __name__ == "__main__":
     df_processed, time_scaler = preprocess_cyclone_data(CSV_INPUT_FILE)
     
-    # 🛠️ CRITICAL FIX: Added compile=False to bypass environment input layout version mismatch crashes
-    model = tf.keras.models.load_model(MODEL_FILENAME, compile=False)
+    print("Patching model archive structure to fix version mismatches...")
+    safe_model_path = patch_keras_model_config(MODEL_FILENAME)
     
+    print("Loading Patched Neural Network Asset...")
+    model = tf.keras.models.load_model(safe_model_path, compile=False)
+    
+    # Remove the temporary safe copy file after it's securely loaded in RAM
+    if os.path.exists(safe_model_path):
+        os.remove(safe_model_path)
+        
+    print("Running Multi-Step Recursive Path Forecasting Loop (+3h, +6h, +9h)...")
     predictions_list = run_recursive_forecast(
         df_processed, model, time_scaler, lookback=LOOKBACK, steps=FORECAST_STEPS
     )
