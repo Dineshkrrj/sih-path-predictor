@@ -50,7 +50,8 @@ def xyz_to_latlon(x, y, z):
     pred_lat = np.degrees(np.arcsin(z_clipped))
     pred_lon = np.degrees(np.arctan2(y, x))
     pred_lon = np.where(pred_lon < 0, pred_lon + 360, pred_lon)
-    return float(round(pred_lat, 4)), float(round(pred_lon, 4))
+    # 🛠️ BUG FIX: Force explicit cast to primitive float to prevent JSON serialization crash
+    return float(round(float(pred_lat), 4)), float(round(float(pred_lon), 4))
 
 def latlon_to_xyz(lat, lon):
     lon_adj = lon - 360 if lon > 180 else lon
@@ -84,7 +85,7 @@ def run_recursive_forecast(df, model, scaler_time, lookback=8, steps=3):
 
     for step in range(1, steps + 1):
         input_matrix = np.expand_dims(current_window, axis=0)
-        predicted_delta = model.predict(input_matrix, verbose=0)[0] # Extract array dimension index
+        predicted_delta = model.predict(input_matrix, verbose=0)[0] 
 
         current_absolute_xyz = current_window[-1, [x_idx, y_idx, z_idx]]
         future_absolute_xyz = current_absolute_xyz + predicted_delta
@@ -121,13 +122,16 @@ def run_recursive_forecast(df, model, scaler_time, lookback=8, steps=3):
 # =====================================================================
 if __name__ == "__main__":
     df_processed, time_scaler = preprocess_cyclone_data(CSV_INPUT_FILE)
-    model = tf.keras.models.load_model(MODEL_FILENAME)
+    
+    # 🛠️ CRITICAL FIX: Added compile=False to bypass environment input layout version mismatch crashes
+    model = tf.keras.models.load_model(MODEL_FILENAME, compile=False)
     
     predictions_list = run_recursive_forecast(
         df_processed, model, time_scaler, lookback=LOOKBACK, steps=FORECAST_STEPS
     )
 
     final_json_output = json.dumps({"predictions": predictions_list}, indent=4)
+    print("\n=== 9-HOUR FORECAST HORIZON OUTCOME ===")
     print(final_json_output)
 
     with open("cyclone_prediction_output.json", "w") as json_file:
